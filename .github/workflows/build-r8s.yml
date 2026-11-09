@@ -20,8 +20,11 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-24.04
+    timeout-minutes: 360
     env:
       TARGET: r8s
+      # Faster final zip compression (larger file), as in upstream's r8s port workflow.
+      UNICA_BROTLI_QUALITY: '1'
 
     steps:
       - name: Checkout repo
@@ -96,13 +99,36 @@ jobs:
 
       - name: Build ROM
         run: |
+          set -o pipefail
           source ./buildenv.sh $TARGET
-          if [ "${{ inputs.beta }}" = "true" ]; then
-            ./scripts/make_rom.sh --beta
-          else
-            ./scripts/make_rom.sh
-          fi
+          FLAGS=""
+          if [ "${{ inputs.beta }}" = "true" ]; then FLAGS="--beta"; fi
+          ./scripts/make_rom.sh $FLAGS 2>&1 | tee out/r8s-build.log
           ls -la out/*.zip
+
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r8s-build-diagnostics
+          path: |
+            out/r8s-build.log
+            out/config.sh
+            out/target/r8s/*.log
+          if-no-files-found: ignore
+          retention-days: 5
+
+      - name: Upload failed patch inputs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r8s-patch-context
+          path: |
+            out/target/r8s/apktool/system/framework/services.jar
+            out/target/r8s/apktool/system/framework/framework.jar
+            out/target/r8s/apktool/system/priv-app/SecSettings/SecSettings.apk
+          if-no-files-found: ignore
+          retention-days: 5
 
       - name: Upload ROM zip
         uses: actions/upload-artifact@v4
